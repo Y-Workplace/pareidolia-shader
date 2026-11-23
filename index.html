@@ -1,0 +1,1999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Pareidolia Fractal & Radiance Cascades — WebGL2 GPU Shader</title>
+  <style>
+    :root {
+      --bg-glass: rgba(10, 12, 18, 0.68);
+      --border-glass: rgba(255, 255, 255, 0.12);
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #030407;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: var(--text-main);
+    }
+
+    #glCanvas {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      touch-action: none;
+      cursor: crosshair;
+    }
+
+    /* Floating button to toggle HUD */
+    #toggleHudBtn {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 30;
+      background: var(--bg-glass);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--border-glass);
+      color: var(--text-main);
+      padding: 9px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+      transition: all 0.2s ease;
+    }
+
+    #toggleHudBtn:hover {
+      border-color: var(--accent);
+      box-shadow: 0 0 18px var(--accent-glow);
+    }
+
+    /* Glassmorphic Control Panel */
+    #hudPanel {
+      position: fixed;
+      top: 62px;
+      right: 16px;
+      width: min(340px, calc(100vw - 32px));
+      max-height: calc(100vh - 80px);
+      overflow-y: auto;
+      z-index: 25;
+      background: var(--bg-glass);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid var(--border-glass);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65);
+      transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+
+    #hudPanel.hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-10px) scale(0.98);
+    }
+
+    #hudPanel::-webkit-scrollbar {
+      width: 5px;
+    }
+    #hudPanel::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+    }
+
+    .hud-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-glass);
+    }
+
+    .hud-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hud-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .stats-badge {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10px;
+      padding: 4px 8px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--accent);
+      text-align: right;
+      line-height: 1.35;
+    }
+
+    .control-group {
+      margin-bottom: 14px;
+    }
+
+    .control-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: #cbd5e1;
+      margin-bottom: 6px;
+    }
+
+    .control-value {
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--accent);
+    }
+
+    /* View mode buttons */
+    .mode-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .mode-btn {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      color: var(--text-muted);
+      padding: 7px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      text-align: center;
+    }
+
+    .mode-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+    }
+
+    .mode-btn.active {
+      background: rgba(56, 189, 248, 0.16);
+      border-color: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.22);
+    }
+
+    /* Custom sliders */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 5px;
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 999px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2px solid var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+      transition: transform 0.15s ease;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.18);
+    }
+
+    select {
+      width: 100%;
+      background: rgba(15, 20, 30, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      color: var(--text-main);
+      padding: 8px 10px;
+      border-radius: 10px;
+      font-size: 12px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    select:focus {
+      border-color: var(--accent);
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 6px;
+      border-top: 1px solid var(--border-glass);
+      margin-top: 8px;
+      gap: 8px;
+    }
+
+    .pill-toggle {
+      flex: 1;
+      padding: 7px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      text-align: center;
+    }
+
+    .pill-toggle.active {
+      background: rgba(56, 189, 248, 0.16);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .hint-footer {
+      margin-top: 12px;
+      font-size: 10.5px;
+      color: var(--text-muted);
+      line-height: 1.45;
+      background: rgba(0, 0, 0, 0.25);
+      padding: 8px 10px;
+      border-radius: 10px;
+    }
+
+    /* WebGL2 error message */
+    #errorBox {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(5, 7, 12, 0.92);
+      z-index: 100;
+      padding: 24px;
+      text-align: center;
+    }
+    #errorBox.visible {
+      display: flex;
+    }
+    .error-card {
+      max-width: 440px;
+      background: #111622;
+      border: 1px solid rgba(248, 113, 113, 0.4);
+      border-radius: 16px;
+      padding: 24px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="glCanvas"></canvas>
+
+  <!-- HUD Toggle Button -->
+  <button id="toggleHudBtn" title="Hide/Show Controls (Key H)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+      <circle cx="12" cy="12" r="3"></circle>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+    </svg>
+    <span>GPU Shader HUD [H]</span>
+  </button>
+
+  <!-- Glassmorphic HUD Panel -->
+  <aside id="hudPanel">
+    <div class="hud-header">
+      <div>
+        <div class="hud-title">INFINITE ZOOM • RADIANCE CASCADES</div>
+        <div class="hud-subtitle">100% GPU WebGL2 • Abstract Kaleidoscope &amp; GI</div>
+      </div>
+      <div class="stats-badge" id="statsBadge">
+        60 FPS<br />1920×1080
+      </div>
+    </div>
+
+    <!-- Render Mode -->
+    <div class="control-group">
+      <div class="control-label">
+        <span>Render Buffer</span>
+      </div>
+      <div class="mode-grid" id="viewModeGrid">
+        <button class="mode-btn active" data-mode="0">Final (GI + Prism)</button>
+        <button class="mode-btn" data-mode="1">Radiance Cascades</button>
+        <button class="mode-btn" data-mode="2">SDF Field &amp; Waves</button>
+        <button class="mode-btn" data-mode="3">Emissive Seed</button>
+      </div>
+    </div>
+
+    <!-- Abstract Archetype (Inspired by References) -->
+    <div class="control-group">
+      <div class="control-label">
+        <span>Fractal / Pareidolia Archetype</span>
+      </div>
+      <select id="archetypeSelect">
+        <option value="0">1. Bioluminescent Rorschach (Organic)</option>
+        <option value="1">2. Prismatic Filaments (3D Ribbons)</option>
+        <option value="2">3. Hyperbolic Tunnel &amp; Singularity</option>
+        <option value="3">4. Mirrored Cathedral (Infinite Lanterns)</option>
+        <option value="4">5. Stellar Mandala &amp; Interference</option>
+        <option value="5" selected>6. Lace KIFS Cathedral (Pure Infinite Zoom)</option>
+        <option value="6">7. Julia Set (Distance Estimation)</option>
+        <option value="7">8. Burning Ship (Deep Zoom)</option>
+        <option value="8">9. Apollonian Gasket (Circle Inversion)</option>
+        <option value="9">10. 2D Mandelbox (Box + Sphere Fold)</option>
+        <option value="10">11. Multi-Julia z^n (Degree Morph)</option>
+      </select>
+    </div>
+
+    <!-- Color Palette -->
+    <div class="control-group">
+      <div class="control-label">
+        <span>Chromatic Spectrum</span>
+      </div>
+      <select id="paletteSelect">
+        <option value="0">Psychedelic Prism (Full Spectrum)</option>
+        <option value="1">Acid Nebula (Green / Magenta / Gold)</option>
+        <option value="2">Solar &amp; Cobalt Cathedral</option>
+        <option value="3">Electric Cherenkov (Blue / Orange)</option>
+        <option value="4" selected>KIFS Emerald &amp; Ultraviolet</option>
+      </select>
+    </div>
+
+    <!-- Domain Distortion -->
+    <div class="control-group">
+      <div class="control-label"><span>Space Distortion</span></div>
+      <select id="warpSelect">
+        <option value="0" selected>None</option>
+        <option value="1">Swirl</option>
+        <option value="2">Radial Ripple</option>
+        <option value="3">Lens / Barrel</option>
+        <option value="4">Sine Waves</option>
+        <option value="5">Mosaic</option>
+        <option value="6">Kaleidoscopic Mirror</option>
+        <option value="7">Banded Glitch</option>
+        <option value="8">Circle Inversion</option>
+        <option value="9">Logarithmic Spiral</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <div class="control-label"><span>Distortion Intensity</span><span class="control-value" id="warpAmtVal">1.00</span></div>
+      <input type="range" id="warpAmtSlider" min="0" max="2" step="0.05" value="1" />
+    </div>
+
+    <!-- Noise -->
+    <div class="control-group">
+      <div class="control-label"><span>Noise (Warp + Color)</span></div>
+      <select id="noiseSelect">
+        <option value="0" selected>None</option>
+        <option value="1">fBm (Clouds)</option>
+        <option value="2">Ridged (Ridges)</option>
+        <option value="3">Worley (Cellular)</option>
+        <option value="4">Value (Grainy)</option>
+        <option value="5">Turbulence</option>
+        <option value="6">Curl (Fluid)</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <div class="control-label"><span>Noise Scale</span><span class="control-value" id="noiseScaleVal">2.5</span></div>
+      <input type="range" id="noiseScaleSlider" min="0.5" max="8" step="0.1" value="2.5" />
+    </div>
+    <div class="control-group">
+      <div class="control-label"><span>Noise Intensity</span><span class="control-value" id="noiseAmtVal">0.60</span></div>
+      <input type="range" id="noiseAmtSlider" min="0" max="2" step="0.05" value="0.6" />
+    </div>
+
+    <!-- Infinite Zoom Speed -->
+    <div class="control-group">
+      <div class="control-label">
+        <span>Infinite Zoom Speed</span>
+        <span class="control-value" id="zoomSpeedVal">0.45</span>
+      </div>
+      <input type="range" id="zoomSpeedSlider" min="-1.5" max="1.5" step="0.05" value="0.45" />
+    </div>
+
+    <!-- Morph / Kaleidoscopic Fold -->
+    <div class="control-group">
+      <div class="control-label">
+        <span>Kaleidoscopic Fold (Symmetry)</span>
+        <span class="control-value" id="morphVal">2.10</span>
+      </div>
+      <input type="range" id="morphSlider" min="0.0" max="6.283" step="0.005" value="2.10" />
+    </div>
+
+    <!-- Fractal Complexity -->
+    <div class="control-group">
+      <div class="control-label">
+        <span>Fractal Depth (Iterations)</span>
+        <span class="control-value" id="iterVal">8</span>
+      </div>
+      <input type="range" id="iterSlider" min="4" max="12" step="1" value="8" />
+    </div>
+
+    <!-- Radiance Cascades Range -->
+    <div class="control-group">
+      <div class="control-label">
+        <span>Radiance Cascades Range (GI)</span>
+        <span class="control-value" id="rcRangeVal">1.15</span>
+      </div>
+      <input type="range" id="rcRangeSlider" min="0.4" max="2.5" step="0.05" value="1.15" />
+    </div>
+
+    <!-- Lighting Gain -->
+    <div class="control-group">
+      <div class="control-label">
+        <span>GI Intensity &amp; Bloom</span>
+        <span class="control-value" id="giGainVal">0.95</span>
+      </div>
+      <input type="range" id="giGainSlider" min="0.2" max="2.5" step="0.05" value="0.95" />
+    </div>
+
+    <!-- Interaction Toggles -->
+    <div class="toggle-row">
+      <button class="pill-toggle active" id="animToggle">Continuous Flow: ON</button>
+      <button class="pill-toggle active" id="cursorLightToggle">Cursor Warp &amp; Light: ON</button>
+    </div>
+
+    <button class="pill-toggle" id="randomBtn" style="width:100%;margin-top:10px">Randomize combination</button>
+
+    <div class="hint-footer">
+      <strong>GPU Navigation:</strong> Move the cursor to bend hyperbolic space and cast light into the Radiance Cascades. Drag to shift the symmetry axis or use the scroll wheel to accelerate/reverse the dive. Press <strong>H</strong> to hide the HUD.
+    </div>
+  </aside>
+
+  <!-- WebGL2 Fallback -->
+  <div id="errorBox">
+    <div class="error-card">
+      <h2 style="margin-bottom: 10px; color: #f87171;">WebGL2 Unavailable</h2>
+      <p style="font-size: 13px; color: #cbd5e1; line-height: 1.5;">
+        This shader requires <strong>WebGL2</strong> support and floating-point textures (<code>EXT_color_buffer_float</code>) to run Radiance Cascades on the GPU. Try opening it in a modern browser with hardware acceleration enabled.
+      </p>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const canvas = document.getElementById('glCanvas');
+      const gl = canvas.getContext('webgl2', {
+        antialias: false,
+        depth: false,
+        stencil: false,
+        alpha: false,
+        powerPreference: 'high-performance'
+      });
+
+      if (!gl) {
+        document.getElementById('errorBox').classList.add('visible');
+        return;
+      }
+
+      // Required extensions for HDR FBOs (RGBA16F) and bilinear filtering
+      const extColorFloat = gl.getExtension('EXT_color_buffer_float');
+      const extFloatLinear = gl.getExtension('OES_texture_float_linear');
+      const useHalfFloat = !!extColorFloat;
+      const internalFormat = useHalfFloat ? gl.RGBA16F : gl.RGBA8;
+      const texType = useHalfFloat ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+      const filterMode = (useHalfFloat && !extFloatLinear) ? gl.NEAREST : gl.LINEAR;
+
+      // =========================================================================
+      // GLSL ES 3.00 SHADERS (100% GPU PIPELINE)
+      // =========================================================================
+
+      // Fullscreen Quad Vertex Shader (VBO-less Triangle Strip)
+      const quadVS = `#version 300 es
+        precision highp float;
+        out vec2 vUv;
+        void main() {
+          vec2 pos = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+          vUv = pos;
+          gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);
+        }
+      `;
+
+      // -------------------------------------------------------------------------
+      // PASS 1: INFINITE ZOOM FRACTAL + ABSTRACT PAREIDOLIA + SDF FIELD
+      // Outputs:
+      //   outColor0 (RGBA16F): RGB = Emissive Seed Radiance, A = Signed Distance SDF
+      //   outColor1 (RGBA16F): RGB = Spectral Albedo, A = Density / 2.5D Relief
+      // -------------------------------------------------------------------------
+      const sceneSDF_FS = `#version 300 es
+        precision highp float;
+
+        in vec2 vUv;
+        layout(location = 0) out vec4 outRadianceSDF;
+        layout(location = 1) out vec4 outMaterialData;
+
+        uniform vec2 uResolution;
+        uniform float uTime;
+        uniform float uZoomTime;
+        uniform float uMorph;
+        uniform int uIterations;
+        uniform int uArchetype;
+        uniform int uPalette;
+        uniform float uManualZoom;
+        uniform vec2 uPan;
+        uniform vec2 uMouse;
+        uniform float uMouseActive;
+        uniform float uCursorLightOn;
+        uniform int uWarpType;
+        uniform float uWarpAmt;
+        uniform int uNoiseType;
+        uniform float uNoiseScale;
+        uniform float uNoiseAmt;
+
+        #define PI 3.14159265359
+        #define TAU 6.28318530718
+
+        mat2 rot(float a) {
+          float s = sin(a), c = cos(a);
+          return mat2(c, -s, s, c);
+        }
+
+        // Inigo Quilez cosine palette for smooth prismatic spectral transitions
+        vec3 cosinePalette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
+          return a + b * cos(TAU * (c * t + d));
+        }
+
+        vec3 getSpectralColor(float t, int pal) {
+          if (pal == 0) {
+            // Full Psychedelic Prism (High-energy neon rainbow)
+            return cosinePalette(t, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.00, 0.33, 0.67));
+          } else if (pal == 1) {
+            // Acid Nebula (Lime green, deep magenta, gold)
+            return cosinePalette(t, vec3(0.48, 0.42, 0.45), vec3(0.52, 0.48, 0.45), vec3(1.0, 1.0, 0.5), vec3(0.80, 0.15, 0.35));
+          } else if (pal == 2) {
+            // Solar & Cobalt Cathedral (Incandescent amber, violet, electric blue)
+            return cosinePalette(t, vec3(0.52, 0.44, 0.55), vec3(0.48, 0.45, 0.45), vec3(1.0, 0.7, 0.4), vec3(0.00, 0.15, 0.25));
+          } else if (pal == 3) {
+            // Electric Cherenkov (Cyan blue, stellar white, fiery orange)
+            return cosinePalette(t, vec3(0.50, 0.50, 0.55), vec3(0.50, 0.50, 0.45), vec3(1.0, 1.0, 1.0), vec3(0.55, 0.42, 0.20));
+          } else {
+            // KIFS Emerald & Ultraviolet (Neon turquoise, magenta, deep indigo)
+            return cosinePalette(t, vec3(0.42, 0.48, 0.54), vec3(0.46, 0.50, 0.46), vec3(1.0, 1.0, 0.8), vec3(0.48, 0.12, 0.62));
+          }
+        }
+
+        // 100% continuous Conformal Log-Polar Transform for seamless Infinite Zoom
+        // The derivative of w = log(z) scales perfectly with r, making the zoom scale-invariant!
+        vec2 logPolarZoom(vec2 p, float zoomPhase, float twist, float sectors) {
+          float r = max(length(p), 1e-4);
+          float a = atan(p.y, p.x);
+
+          // Triangular angular mirroring (continuous triangle wave, no mod jump)
+          float sectorAngle = TAU / sectors;
+          float aNorm = (a + PI) / sectorAngle;
+          float triA = abs(fract(aNorm) - 0.5) * sectorAngle;
+
+          // Continuous log-radius (avoids abrupt mod/fract!)
+          float logR = log(r) - zoomPhase;
+
+          // Smooth helical twist
+          triA += twist * sin(logR * 0.8);
+
+          return vec2(logR, triA * 1.35);
+        }
+
+        // Lace KIFS fractal core with continuous self-similarity (used in Multi-Octave Zoom)
+        vec3 evalKIFSLaceOctave(vec2 z, float morph) {
+          float minOrb = 1e5;
+          float laceTrap = 1e5;
+          float scale = 1.0;
+
+          for (int i = 0; i < 9; i++) {
+            if (i >= uIterations) break;
+            z = abs(z);
+            if (z.x > z.y) z = z.yx;
+            z -= vec2(0.36 + 0.05 * sin(morph), 0.54 + 0.05 * cos(morph));
+            z *= rot(0.32 + 0.12 * sin(morph + float(i) * 0.4));
+
+            float r2 = clamp(dot(z, z), 0.24, 1.75);
+            float k = 1.32 / r2;
+            z *= k;
+            scale *= k;
+
+            float hexNode = abs(length(z - vec2(0.22, 0.28)) - 0.21);
+            laceTrap = min(laceTrap, hexNode / scale);
+            minOrb = min(minOrb, length(z));
+          }
+
+          return vec3(laceTrap, minOrb, scale);
+        }
+
+
+        // ===================== NOISE FUNCTIONS =====================
+        float hash12(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+        vec2 hash22(vec2 p) {
+          p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+          return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+        }
+        float gnoise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+          return mix(mix(dot(hash22(i), f), dot(hash22(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
+                     mix(dot(hash22(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)), dot(hash22(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x), u.y);
+        }
+        float vnoise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), u.x),
+                     mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x), u.y) - 0.5;
+        }
+        float fbm(vec2 p) {
+          float a = 0.5, sum = 0.0;
+          for (int i = 0; i < 5; i++) { sum += a * gnoise(p); p = p * 2.02 + vec2(17.3, 9.1); a *= 0.5; }
+          return sum;
+        }
+        float ridged(vec2 p) {
+          float a = 0.5, sum = 0.0;
+          for (int i = 0; i < 5; i++) {
+            float n = 1.0 - abs(gnoise(p)) * 2.0;
+            sum += a * (n * n - 0.5);
+            p = p * 2.02 + vec2(17.3, 9.1); a *= 0.5;
+          }
+          return sum;
+        }
+        float worley(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          float md = 8.0;
+          for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+            vec2 g = vec2(float(x), float(y));
+            vec2 o = 0.5 + 0.5 * sin(uTime * 0.6 + TAU * (hash22(i + g) * 0.5 + 0.5));
+            md = min(md, length(g + o - f));
+          }
+          return md - 0.5;
+        }
+        // 1 fBm, 2 Ridged, 3 Worley, 4 Value, 5 Turbulence, 6 Curl (color uses fBm)
+        float noiseField(vec2 q, int type) {
+          if (type == 2) return ridged(q);
+          if (type == 3) return worley(q);
+          if (type == 4) return vnoise(q * 1.5) + 0.5 * vnoise(q * 3.0);
+          if (type == 5) return abs(fbm(q)) * 2.0 - 0.4;
+          return fbm(q);
+        }
+
+        // ===================== DOMAIN DISTORTIONS =====================
+        vec2 applyWarp(vec2 p) {
+          float a = uWarpAmt;
+          float t = uTime;
+          if (uWarpType == 1) {            // Swirl
+            float r = length(p);
+            p *= rot(a * 2.4 * exp(-r * r * 0.8) + 0.4 * a * sin(t * 0.5));
+          } else if (uWarpType == 2) {     // Radial ripple
+            float r = length(p);
+            p += p / max(r, 1e-4) * sin(r * 14.0 - t * 2.5) * 0.025 * a;
+          } else if (uWarpType == 3) {     // Lens / barrel
+            p /= 1.0 + a * 0.45 * dot(p, p);
+          } else if (uWarpType == 4) {     // Sine waves
+            p += a * 0.05 * vec2(sin(p.y * 8.0 + t * 1.3), sin(p.x * 8.0 - t));
+          } else if (uWarpType == 5) {     // Mosaic
+            float g = 36.0 / (0.4 + a);
+            p = mix(p, (floor(p * g) + 0.5) / g, 0.6);
+          } else if (uWarpType == 6) {     // Kaleidoscopic mirror
+            float n = floor(3.0 + a * 4.0);
+            float seg = TAU / n;
+            float ang = abs(mod(atan(p.y, p.x), seg) - seg * 0.5);
+            p = length(p) * vec2(cos(ang), sin(ang));
+          } else if (uWarpType == 7) {     // Banded glitch
+            float h = hash12(vec2(floor(p.y * 18.0), floor(t * 5.0)));
+            p.x += step(0.82, h) * (h - 0.82) * a * 1.2;
+          } else if (uWarpType == 8) {     // Circle inversion
+            p *= mix(1.0, 1.0 / max(dot(p, p), 0.25), clamp(a * 0.5, 0.0, 1.0));
+          } else if (uWarpType == 9) {     // Logarithmic spiral
+            float r = length(p);
+            float ang = atan(p.y, p.x) + a * 0.8 * log(max(r, 1e-3));
+            p = r * vec2(cos(ang), sin(ang));
+          }
+          return p;
+        }
+
+        // Noise-based domain warp (fBm, ridged, worley, value, turbulence, curl)
+        vec2 noiseWarp(vec2 p) {
+          if (uNoiseType == 0 || uNoiseAmt < 0.001) return p;
+          vec2 q = p * uNoiseScale + vec2(uTime * 0.08, -uTime * 0.06);
+          vec2 w;
+          if (uNoiseType == 6) {
+            float e = 0.02;
+            w = vec2(fbm(q + vec2(0.0, e)) - fbm(q - vec2(0.0, e)),
+                    -(fbm(q + vec2(e, 0.0)) - fbm(q - vec2(e, 0.0)))) / (2.0 * e) * 0.25;
+          } else {
+            w = vec2(noiseField(q, uNoiseType), noiseField(q + vec2(5.2, 1.3), uNoiseType));
+          }
+          return p + w * uNoiseAmt * 0.35;
+        }
+
+        // ===================== NEW FRACTALS (6..10) =====================
+        // Returns vec3(estimated distance, trap/phase, 0)
+        vec3 fractalSet(int kind, vec2 q) {
+          if (kind == 8) {                 // Apollonian Gasket (circle inversion)
+            float s = 1.05 + 0.2 * sin(uMorph * 0.5);
+            float sc = 1.0, tr = 1e5;
+            q *= 1.4;
+            for (int i = 0; i < 12; i++) {
+              if (i >= uIterations) break;
+              q = -1.0 + 2.0 * fract(0.5 * q + 0.5);
+              float k = s / max(dot(q, q), 1e-4);
+              q *= k; sc *= k;
+              tr = min(tr, length(q));
+            }
+            return vec3((0.25 * abs(q.y) / sc - 0.002) / 1.4, tr * 0.35, 0.0);
+          }
+          if (kind == 9) {                 // 2D Mandelbox (box fold + sphere fold)
+            float S = -1.9 + 0.35 * sin(uMorph * 0.7);
+            vec2 c = q * 1.2;
+            vec2 z = c;
+            float dr = 1.0, tr = 1e5;
+            for (int i = 0; i < 12; i++) {
+              if (i >= uIterations) break;
+              z = clamp(z, -1.0, 1.0) * 2.0 - z;
+              float r2 = dot(z, z);
+              if (r2 < 0.25) { z *= 4.0; dr *= 4.0; }
+              else if (r2 < 1.0) { z /= r2; dr /= r2; }
+              z = S * z + c;
+              dr = dr * abs(S) + 1.0;
+              tr = min(tr, abs(length(z) - 1.0));
+            }
+            float de = length(z) / abs(dr);
+            return vec3((abs(de - 0.06) * 0.8 - 0.004) / 1.2, tr * 0.8, 0.0);
+          }
+          // 6 = Julia, 7 = Burning Ship (zoom on c), 10 = Multi-Julia (z^n)
+          vec2 c, z;
+          float sc = 1.5, powN = 2.0, dzm = 1.0;
+          if (kind == 6) {
+            c = vec2(-0.745, 0.113) + 0.07 * vec2(cos(uMorph), sin(uMorph));
+            z = q * 1.5;
+          } else if (kind == 7) {
+            sc = 0.12;
+            c = vec2(-1.7443, -0.0173) + rot(uMorph * 0.3) * (q * sc);
+            z = vec2(0.0);
+            dzm = 0.0;
+          } else {
+            powN = 2.0 + floor(mod(uMorph * 0.6, 4.0));
+            c = 0.55 * vec2(cos(uMorph * 2.0 + 0.5), sin(uMorph * 2.0 + 0.5));
+            z = q * 1.5;
+          }
+          float tr = 1e5, it = 0.0;
+          bool esc = false;
+          int nI = uIterations * 5;
+          for (int i = 0; i < 60; i++) {
+            if (i >= nI) break;
+            float rr = length(z);
+            if (rr > 32.0) { esc = true; break; }
+            if (kind == 10) {
+              float ang = atan(z.y, z.x) * powN;
+              dzm = powN * pow(rr, powN - 1.0) * dzm;
+              z = pow(rr, powN) * vec2(cos(ang), sin(ang)) + c;
+            } else {
+              dzm = 2.0 * rr * dzm + (kind == 7 ? 1.0 : 0.0);
+              vec2 w = (kind == 7) ? abs(z) : z;
+              z = vec2(w.x * w.x - w.y * w.y, 2.0 * w.x * w.y) + c;
+            }
+            tr = min(tr, length(z - vec2(0.15, 0.35)));
+            it += 1.0;
+          }
+          if (!esc) return vec3((abs(tr - 0.35) - 0.02) * 0.25, tr * 1.2, 0.0);
+          float r = length(z);
+          float de = 0.5 * r * log(max(r, 1.0001)) / max(dzm, 1e-6);
+          return vec3(de / sc - 0.0015, tr * 1.2 + it * 0.04, 0.0);
+        }
+
+        // Evaluates the 100% procedural abstract, kaleidoscopic, infinite-zoom SDF field
+        // Returns vec4(sdf, spectralPhase, filamentGlow, causticTrap)
+        vec4 evalInfiniteAbstractSDF(vec2 p) {
+          float zoomPhase = uZoomTime;
+          float d = 1e5;
+          float phase = 0.0;
+          float glow = 0.0;
+          float trap = 1e5;
+
+          if (uArchetype == 0) {
+            // =================================================================
+            // ARCHETYPE 1: BIOLUMINESCENT RORSCHACH (Continuous Logarithmic Zoom)
+            // =================================================================
+            vec2 sp = vec2(abs(p.x), p.y);
+            float r = max(length(sp), 1e-4);
+
+            // Smooth infinite dive blending continuous log-polar scale with bilateral fold
+            float logZoom = log(r) - zoomPhase * 0.85;
+            vec2 z = vec2(cos(logZoom * 1.5), sin(logZoom * 1.5)) * (0.65 + 0.35 * sin(atan(sp.y, sp.x) * 3.0));
+            z += normalize(sp + vec2(1e-4)) * (0.45 * sin(logZoom * 2.0));
+
+            for (int w = 0; w < 3; w++) {
+              float fw = float(w + 1);
+              z += 0.15 / fw * vec2(
+                sin(z.y * 3.4 * fw + uMorph + zoomPhase * 0.5),
+                cos(z.x * 3.4 * fw - uMorph * 0.7 + zoomPhase * 0.4)
+              );
+            }
+
+            float minOrbit = 1e5;
+            float ribbonTrap = 1e5;
+            mat2 rMat = rot(0.48 + 0.25 * sin(uMorph));
+
+            for (int i = 0; i < 12; i++) {
+              if (i >= uIterations) break;
+              z = abs(z) - vec2(0.54 + 0.10 * sin(uMorph + float(i) * 0.4), 0.46);
+              z *= rMat;
+              float r2 = max(dot(z, z), 0.14);
+              z /= r2;
+              z *= 1.18;
+
+              minOrbit = min(minOrbit, length(z));
+              ribbonTrap = min(ribbonTrap, abs(z.x * z.y));
+            }
+
+            // Pareidolic cavities that pulse and breathe in sync with the dive
+            float lobePulse = 0.55 + 0.12 * sin(logZoom * 2.0);
+            float voidLobes = length(vec2(abs(p.x) - lobePulse, p.y * 1.15)) - 0.20;
+
+            d = (ribbonTrap - 0.05) * 0.24;
+            d = max(d, -voidLobes * 0.35);
+            d = min(d, abs(voidLobes) - 0.012);
+
+            phase = minOrbit * 0.65 - logZoom * 0.28;
+            glow = exp(-abs(d) * 44.0) + exp(-abs(voidLobes) * 24.0) * 0.55;
+            trap = minOrbit;
+
+          } else if (uArchetype == 1) {
+            // =================================================================
+            // ARCHETYPE 2: PRISMATIC FILAMENTS (Seamless Zoom Octaves)
+            // =================================================================
+            vec2 sp = vec2(abs(p.x), p.y);
+            float minRibbon = 1e5;
+            float ribbonId = 0.0;
+
+            // 5 exponential octaves with Hanning window sin^2(PI * t) -> zero hard seam!
+            for (int layer = 0; layer < 5; layer++) {
+              float fl = float(layer);
+              float tLayer = fract(zoomPhase * 0.22 + fl * 0.20);
+              // Strictly exponential growth (constant visual speed!)
+              float layerScale = exp((tLayer - 0.5) * 3.2);
+              // Hanning window guarantees exact 0.0 weight at t=0 and t=1
+              float sWin = sin(tLayer * PI);
+              float fade = sWin * sWin;
+
+              vec2 q = sp * layerScale;
+              q *= rot(0.35 * sin(uMorph + fl * 1.2566) + tLayer * 0.5);
+
+              for (int i = 0; i < 6; i++) {
+                if (i >= uIterations) break;
+                q = abs(q) - vec2(0.42, 0.38);
+                q *= rot(0.62 + 0.18 * cos(uMorph + float(i)));
+                q = vec2(q.x * q.x - q.y * q.y, 2.0 * q.x * q.y) * 0.85 + vec2(0.18, -0.12);
+              }
+
+              float wave = sin(q.x * 3.5 + uMorph) * 0.28 - q.y;
+              float ribbonDist = (abs(wave) - 0.032) / layerScale;
+
+              if (fade > 0.01) {
+                // Smooth blend between octaves
+                float effectiveDist = mix(0.25, ribbonDist, fade);
+                if (effectiveDist < minRibbon) {
+                  minRibbon = effectiveDist;
+                  ribbonId = length(q) * 0.25 + (zoomPhase * 0.22 + fl * 0.20) * 0.35;
+                }
+                glow += fade * exp(-max(ribbonDist, 0.0) * 65.0) * 0.42;
+              }
+              trap = min(trap, abs(q.x) + abs(q.y));
+            }
+
+            d = minRibbon;
+            phase = ribbonId + p.y * 0.3;
+
+          } else if (uArchetype == 2) {
+            // =================================================================
+            // ARCHETYPE 3: HYPERBOLIC TUNNEL & SOLAR SINGULARITY
+            // =================================================================
+            float r = length(p);
+            float coreRadius = 0.19 + 0.015 * sin(uMorph * 2.0);
+            float coreDist = r - coreRadius;
+
+            // 100% continuous conformal Log-Polar coordinates
+            vec2 lp = logPolarZoom(p, zoomPhase * 0.95, 0.22 * sin(uMorph), 6.0);
+            // Smooth periodic repetition via sine/cosine on the logR axis (zero discontinuity!)
+            vec2 z = vec2(sin(lp.x * 2.0), cos(lp.x * 2.0)) * 0.65 + vec2(lp.y * 0.45, -lp.y * 0.35);
+
+            float fiberTrap = 1e5;
+            float branchAccum = 0.0;
+
+            for (int i = 0; i < 10; i++) {
+              if (i >= uIterations) break;
+              z = abs(z);
+              z -= vec2(0.38 + 0.08 * cos(uMorph), 0.32);
+              z *= rot(0.55 + 0.2 * sin(uMorph + float(i) * 0.35));
+              float inv = 1.15 / clamp(dot(z, z), 0.18, 2.0);
+              z *= inv;
+              fiberTrap = min(fiberTrap, abs(z.y - sin(z.x * 4.0) * 0.18));
+              branchAccum += exp(-abs(z.x) * 4.0);
+            }
+
+            float tunnelSDF = (fiberTrap - 0.026) * max(r, 0.18) * 0.65;
+            d = min(coreDist, tunnelSDF);
+
+            phase = atan(p.y, p.x) / TAU * 3.0 + lp.x * 0.35;
+            glow = exp(-max(coreDist, 0.0) * 18.0) * 1.45 + exp(-max(tunnelSDF, 0.0) * 48.0) * 0.9;
+            trap = branchAccum * 0.15;
+
+          } else if (uArchetype == 3) {
+            // =================================================================
+            // ARCHETYPE 4: MIRRORED CATHEDRAL (Multi-Octave Exponential Zoom)
+            // =================================================================
+            vec2 sp = vec2(abs(p.x), p.y);
+            float minD = 1e5;
+            float bestPhase = 0.0;
+
+            // 4 exponential octaves with Hanning window for seamless infinite zoom
+            for (int oct = 0; oct < 4; oct++) {
+              float fo = float(oct);
+              float t = fract(zoomPhase * 0.25 + fo * 0.25);
+              float scale = exp((t - 0.5) * 3.5);
+              float sWin = sin(t * PI);
+              float fade = sWin * sWin;
+
+              vec2 z = sp * scale;
+              float fScale = scale;
+              float orbTrap = 1e5;
+              float pillarTrap = 1e5;
+
+              for (int i = 0; i < 8; i++) {
+                if (i >= uIterations) break;
+                z = abs(z);
+                if (z.x > z.y) z = z.yx;
+                z -= vec2(0.35, 0.52 + 0.08 * sin(uMorph));
+
+                float k = 1.28 / clamp(dot(z, z), 0.22, 1.8);
+                z *= k;
+                fScale *= k;
+
+                z *= rot(0.22 * cos(uMorph));
+                orbTrap = min(orbTrap, abs(length(z - vec2(0.25, 0.25)) - 0.24));
+                pillarTrap = min(pillarTrap, abs(z.x - 0.08));
+              }
+
+              float dOct = min(orbTrap - 0.025, pillarTrap - 0.015) / fScale;
+              if (fade > 0.01) {
+                float weightedD = mix(0.2, dOct, fade);
+                if (weightedD < minD) {
+                  minD = weightedD;
+                  bestPhase = orbTrap * 2.2 + (zoomPhase * 0.25 + fo * 0.25) * 0.5;
+                }
+                glow += fade * (exp(-max(orbTrap / fScale, 0.0) * 55.0) * 0.9 + exp(-max(pillarTrap / fScale, 0.0) * 70.0) * 0.6);
+              }
+              trap = min(trap, orbTrap);
+            }
+
+            d = minD;
+            phase = bestPhase + length(p) * 0.4;
+
+          } else if (uArchetype == 4) {
+            // =================================================================
+            // ARCHETYPE 5: STELLAR MANDALA & SPECTRAL INTERFERENCE
+            // =================================================================
+            float r = max(length(p), 1e-4);
+            float a = atan(p.y, p.x);
+
+            // Continuous octagonal symmetry
+            float sector = TAU / 8.0;
+            a = abs(fract((a + sector * 0.5) / sector) - 0.5) * sector;
+            vec2 sp = vec2(cos(a), sin(a)) * r;
+
+            // Continuous infinite zoom via logarithmic phase
+            float logR = log(r) - zoomPhase * 0.75;
+            vec2 z = vec2(cos(logR * 2.0), sin(logR * 2.0)) * (0.55 + 0.25 * sin(uMorph)) + sp * 0.85;
+
+            float webTrap = 1e5;
+            for (int i = 0; i < 9; i++) {
+              if (i >= uIterations) break;
+              z = abs(z) - vec2(0.45, 0.22);
+              z *= rot(0.392699 + 0.15 * sin(uMorph + float(i)));
+              float k = 1.15 / clamp(dot(z, z), 0.25, 1.6);
+              z *= k;
+              webTrap = min(webTrap, min(abs(z.x), abs(z.y)));
+            }
+
+            float rings = abs(sin(logR * 5.0 + webTrap * 6.0)) * 0.055;
+            float starRays = abs(sin(a * 8.0)) * r * 0.35;
+            d = min(webTrap * 0.18 + rings - 0.014, starRays - 0.005);
+
+            phase = logR * 0.35 + webTrap * 1.8;
+            glow = exp(-abs(d) * 68.0) * 0.72;
+            trap = webTrap;
+
+          } else if (uArchetype == 5) {
+            // =================================================================
+            // ARCHETYPE 6: LACE KIFS CATHEDRAL (PURE INFINITE ZOOM)
+            // Turquoise/violet fractal filigree with spiral folds and symmetric
+            // arches, 100% procedural with no artificial shapes
+            // =================================================================
+            vec2 sp = vec2(abs(p.x), p.y);
+            float minLaceD = 1e5;
+            float bestPhase = 0.0;
+
+            // Lace KIFS Fractal Cathedral with Multi-Octave Infinite Zoom
+            for (int oct = 0; oct < 4; oct++) {
+              float fo = float(oct);
+              float t = fract(zoomPhase * 0.20 + fo * 0.25);
+              float scale = exp((t - 0.5) * 3.6);
+              float sWin = sin(t * PI);
+              float fade = sWin * sWin;
+
+              // Arch and lateral spiral folding characteristic of the KIFS fractal
+              vec2 q = sp * scale;
+              q.y += 0.15 * sin(q.x * 2.2 + uMorph);
+              vec3 laceRes = evalKIFSLaceOctave(q, uMorph);
+
+              float dOct = (laceRes.x - 0.014) / scale;
+              if (fade > 0.01) {
+                float wDist = mix(0.22, dOct, fade);
+                if (wDist < minLaceD) {
+                  minLaceD = wDist;
+                  bestPhase = laceRes.y * 0.55 + (zoomPhase * 0.20 + fo * 0.25) * 0.45;
+                }
+                // Emerald/turquoise glow on the lace edges of the fractal
+                glow += fade * exp(-max(dOct, 0.0) * 58.0) * 0.72;
+              }
+              trap = min(trap, laceRes.y);
+            }
+
+            d = minLaceD;
+            phase = bestPhase + length(p) * 0.25;
+
+          } else {
+            // =================================================================
+            // ARCHETYPES 7-11: Julia, Burning Ship, Apollonian, Mandelbox, Multi-Julia
+            // (3 zoom octaves with Hanning window, matching the others)
+            // =================================================================
+            float minD = 1e5;
+            float bestPhase = 0.0;
+            for (int oct = 0; oct < 3; oct++) {
+              float fo = float(oct);
+              float t = fract(zoomPhase * 0.18 + fo / 3.0);
+              float scale = exp((t - 0.5) * 3.0);
+              float sWin = sin(t * PI);
+              float fade = sWin * sWin;
+              vec3 f = fractalSet(uArchetype, p * scale);
+              float dOct = f.x / scale;
+              if (fade > 0.01) {
+                float wD = mix(0.22, dOct, fade);
+                if (wD < minD) {
+                  minD = wD;
+                  bestPhase = f.y * 0.8 + t * 0.45 + fo / 3.0 * 0.45;
+                }
+                glow += fade * exp(-max(dOct, 0.0) * 60.0) * 0.6;
+              }
+              trap = min(trap, f.y);
+            }
+            d = minD;
+            phase = bestPhase + length(p) * 0.2;
+          }
+
+          return vec4(d, phase, glow, trap);
+        }
+
+        void main() {
+          vec2 aspect = vec2(uResolution.x / uResolution.y, 1.0);
+          vec2 p = (vUv * 2.0 - 1.0) * aspect;
+
+          // Interactive hyperbolic cursor distortion
+          vec2 mouseNorm = (uMouse * 2.0 - 1.0) * aspect;
+          if (uCursorLightOn > 0.5 && uMouseActive > 0.01) {
+            vec2 delta = p - mouseNorm;
+            float mDist = length(delta);
+            p -= delta * (0.12 * exp(-mDist * 2.8)) * uMouseActive;
+          }
+
+          p = p / uManualZoom + uPan;
+          vec2 pBase = p;
+          p = applyWarp(p);
+          p = noiseWarp(p);
+
+          vec4 res = evalInfiniteAbstractSDF(p);
+          float d = res.x;
+          float spectralPhase = res.y;
+          float glow = res.z;
+          float trap = res.w;
+          float nCol = (uNoiseType != 0) ? noiseField(p * uNoiseScale * 1.3 + 3.7, uNoiseType) : 0.0;
+          spectralPhase += nCol * uNoiseAmt * 0.8;
+
+          // Rich spectral colors based on fractal phase
+          vec3 specPrimary   = getSpectralColor(spectralPhase, uPalette);
+          vec3 specSecondary = getSpectralColor(spectralPhase + 0.38, uPalette);
+
+          // Fractal matter albedo
+          vec3 albedo = mix(specPrimary * 0.14, specSecondary * 0.35, clamp(trap * 2.5, 0.0, 1.0));
+
+          // Emissive Seed Radiance (calibrated to prevent blowing out to white in cascades)
+          vec3 emissive = vec3(0.0);
+
+          // Energetic fractal filaments and edges (focusing on thin, high-saturation lines)
+          float coreLine = smoothstep(0.008, -0.003, d);
+          emissive += specPrimary * (glow * 0.85 + coreLine * 0.95);
+
+          // Secondary prismatic dispersion (rainbow halos at phase transitions)
+          float fringe = smoothstep(0.025, 0.0, abs(d - 0.016));
+          emissive += specSecondary * fringe * 0.42;
+
+          // Dynamic light source at cursor to illuminate cascades in real time
+          if (uCursorLightOn > 0.5) {
+            vec2 cursorWorld = mouseNorm / uManualZoom + uPan;
+            float distCursor = length(pBase - cursorWorld);
+            float cursorSpot = exp(-distCursor * 24.0) * 1.35 + exp(-distCursor * 7.0) * 0.18;
+            vec3 cursorCol = getSpectralColor(uTime * 0.15, uPalette) + vec3(0.25);
+            emissive += cursorCol * cursorSpot * (0.2 + 0.8 * uMouseActive);
+          }
+
+          emissive *= clamp(1.0 + nCol * uNoiseAmt * 0.6, 0.3, 2.0);
+
+          float height25D = clamp(1.0 - abs(d) * 8.0, 0.0, 1.0);
+
+          outRadianceSDF = vec4(emissive, d);
+          outMaterialData = vec4(albedo, height25D);
+        }
+      `;
+
+      // -------------------------------------------------------------------------
+      // PASS 2..N: RADIANCE CASCADES (2D/2.5D HIERARCHICAL GLOBAL ILLUMINATION)
+      // Faithful implementation of the Radiance Cascades algorithm (Alexander Sannikov):
+      // - Each cascade c (from N-1 down to 0) divides space into probes spaced by 2^c
+      //   and angular directions scaled by 4^c.
+      // - Casts rays through the SDF field (distance-accelerated raymarching!)
+      //   to capture emissive radiance and soft shadow occlusion.
+      // - If the ray does not hit an occluder within [tStart, tEnd], it performs
+      //   bilinear merging of the 4 corresponding angular rays from cascade c+1!
+      // -------------------------------------------------------------------------
+      const radianceCascadeFS = `#version 300 es
+        precision highp float;
+
+        in vec2 vUv;
+        out vec4 fragColor;
+
+        uniform sampler2D uSceneTex;     // RGB = Emissive, A = SDF Distance
+        uniform sampler2D uUpperCascade; // Cascade c + 1 (for hierarchical merging)
+        uniform vec2 uCascadeRes;        // Current cascade buffer resolution
+        uniform vec2 uUpperRes;          // Upper cascade buffer resolution
+        uniform vec2 uSceneRes;          // SDF scene resolution
+        uniform int uCascadeIndex;       // Current cascade index (0 = finest)
+        uniform int uTotalCascades;      // Total cascades (e.g. 5)
+        uniform float uMaxRange;         // Maximum light range in UV space
+        uniform float uBounceGain;       // Radiance gain
+
+        #define TAU 6.28318530718
+
+        // Converts normalized SDF distance (in height/aspect) to UV space
+        float sampleSDF_UV(vec2 uv) {
+          float aspect = uSceneRes.x / uSceneRes.y;
+          // d is in Y space (-1..1 => height 2.0), so in UV Y it is d * 0.5
+          return texture(uSceneTex, uv).a * 0.5;
+        }
+
+        // Casts a ray over interval [tMin, tMax] using Sphere Tracing on the SDF
+        // Returns vec4(radiance.rgb, transmittance)
+        vec4 traceInterval(vec2 originUV, vec2 dir, float tMin, float tMax) {
+          float aspect = uSceneRes.x / uSceneRes.y;
+          vec2 aspectScale = vec2(1.0 / aspect, 1.0);
+
+          vec3 accumLight = vec3(0.0);
+          float transmittance = 1.0;
+
+          float t = tMin;
+          // Adaptive step count per interval
+          const int MAX_STEPS = 20;
+
+          for (int i = 0; i < MAX_STEPS; i++) {
+            if (t >= tMax || transmittance < 0.02) break;
+
+            vec2 sampleUV = originUV + dir * t * aspectScale;
+
+            // Off-screen: attenuate smoothly
+            if (sampleUV.x < 0.0 || sampleUV.x > 1.0 || sampleUV.y < 0.0 || sampleUV.y > 1.0) {
+              break;
+            }
+
+            vec4 sceneSample = texture(uSceneTex, sampleUV);
+            vec3 emit = sceneSample.rgb;
+            float sdf = sceneSample.a * 0.5; // in UV height units
+
+            // Volumetric absorption / subtle fog along the ray
+            float stepLen = clamp(abs(sdf) * 0.85, 0.003, (tMax - tMin) * 0.35);
+            if (t + stepLen > tMax) stepLen = tMax - t;
+
+            // Volumetric + surface emissive contribution (faster falloff to preserve contrast)
+            float falloff = 1.0 / (1.0 + t * t * 28.0);
+            accumLight += transmittance * emit * stepLen * 9.5 * falloff;
+
+            // If ray penetrates solid geometry (sdf <= 0), absorb light (cast shadow!)
+            if (sdf <= 0.001) {
+              // Direct light on impact surface before total occlusion
+              accumLight += transmittance * emit * 0.45 * falloff;
+              float density = smoothstep(0.002, -0.015, sdf);
+              transmittance *= (1.0 - density * 0.94);
+            }
+
+            t += max(stepLen, 0.0025);
+          }
+
+          return vec4(accumLight, transmittance);
+        }
+
+        // Samples the upper cascade (c + 1) with bilinear spatial interpolation
+        // and averages the 4 corresponding angular sub-rays
+        vec4 sampleUpperCascade(vec2 probePosUV, int baseRayIdx, int upperDirsPerSide, float upperProbeSpacing) {
+          // Probe grid size in the upper cascade
+          vec2 upperGridSize = floor(uUpperRes / float(upperDirsPerSide));
+          if (upperGridSize.x < 1.0 || upperGridSize.y < 1.0) return vec4(0.0);
+
+          // Continuous coordinate in the upper probe grid
+          vec2 upperProbeCoord = probePosUV * upperGridSize - 0.5;
+          vec2 baseProbe = floor(upperProbeCoord);
+          vec2 frac = clamp(upperProbeCoord - baseProbe, 0.0, 1.0);
+
+          vec4 mergedRadiance = vec4(0.0);
+
+          // Average over the 4 sub-angles in the upper cascade covering the current ray cone
+          for (int sub = 0; sub < 4; sub++) {
+            int upperRayIdx = baseRayIdx * 4 + sub;
+            int ux = upperRayIdx % upperDirsPerSide;
+            int uy = upperRayIdx / upperDirsPerSide;
+            vec2 dirOffset = vec2(float(ux), float(uy)) + 0.5;
+
+            // Bilinear interpolation across the 4 neighboring spatial probes
+            vec2 p00 = (clamp(baseProbe + vec2(0.0, 0.0), vec2(0.0), upperGridSize - 1.0) * float(upperDirsPerSide) + dirOffset) / uUpperRes;
+            vec2 p10 = (clamp(baseProbe + vec2(1.0, 0.0), vec2(0.0), upperGridSize - 1.0) * float(upperDirsPerSide) + dirOffset) / uUpperRes;
+            vec2 p01 = (clamp(baseProbe + vec2(0.0, 1.0), vec2(0.0), upperGridSize - 1.0) * float(upperDirsPerSide) + dirOffset) / uUpperRes;
+            vec2 p11 = (clamp(baseProbe + vec2(1.0, 1.0), vec2(0.0), upperGridSize - 1.0) * float(upperDirsPerSide) + dirOffset) / uUpperRes;
+
+            vec4 s00 = texture(uUpperCascade, p00);
+            vec4 s10 = texture(uUpperCascade, p10);
+            vec4 s01 = texture(uUpperCascade, p01);
+            vec4 s11 = texture(uUpperCascade, p11);
+
+            vec4 bilinearSample = mix(mix(s00, s10, frac.x), mix(s01, s11, frac.x), frac.y);
+            mergedRadiance += bilinearSample * 0.25;
+          }
+
+          return mergedRadiance;
+        }
+
+        void main() {
+          // Cascade Atlas Layout:
+          // In cascade c:
+          //   dirsPerSide = 2^(c + 1)  -> totalDirs = dirsPerSide^2 = 4^(c + 1)
+          //   Cascade 0: 2x2 = 4 directions per probe (maximum spatial resolution!)
+          //   Cascade 1: 4x4 = 16 directions per probe
+          //   Cascade 2: 8x8 = 64 directions per probe
+          //   Cascade 3: 16x16 = 256 directions per probe
+          int dirsPerSide = 1 << (uCascadeIndex + 1);
+          int totalDirs = dirsPerSide * dirsPerSide;
+
+          vec2 pixelCoord = floor(vUv * uCascadeRes);
+          vec2 probeIndex = floor(pixelCoord / float(dirsPerSide));
+          vec2 dirIndex2D = mod(pixelCoord, float(dirsPerSide));
+          vec2 gridSize   = floor(uCascadeRes / float(dirsPerSide));
+
+          // Normalized probe position on screen [0..1]
+          vec2 probeUV = (probeIndex + 0.5) / max(gridSize, vec2(1.0));
+
+          // Linear angular index and ray center angle
+          int rayIdx = int(dirIndex2D.y) * dirsPerSide + int(dirIndex2D.x);
+          float angle = (float(rayIdx) + 0.5) * (TAU / float(totalDirs));
+          vec2 rayDir = vec2(cos(angle), sin(angle));
+
+          // Geometric cascade intervals (exponential progression 4^c)
+          // Prevents ringing and guarantees seamless gap-free coverage
+          float baseInterval = uMaxRange / float(1 << (uTotalCascades * 2));
+          float tMin = (uCascadeIndex == 0) ? 0.0 : baseInterval * float(1 << (uCascadeIndex * 2));
+          float tMax = baseInterval * float(1 << ((uCascadeIndex + 1) * 2));
+
+          // 1. Trace local interval [tMin, tMax] in the SDF field
+          vec4 localResult = traceInterval(probeUV, rayDir, tMin, tMax);
+
+          // 2. If not the highest cascade and transmittance remains,
+          //    merge with the upper cascade (c + 1)
+          vec4 finalRadiance = localResult;
+          if (uCascadeIndex < uTotalCascades - 1 && localResult.a > 0.01) {
+            int upperDirsPerSide = dirsPerSide * 2;
+            vec4 upperResult = sampleUpperCascade(probeUV, rayIdx, upperDirsPerSide, 0.0);
+            finalRadiance.rgb += localResult.a * upperResult.rgb;
+            finalRadiance.a *= upperResult.a;
+          }
+
+          if (uCascadeIndex == 0) {
+            finalRadiance.rgb *= uBounceGain;
+          }
+
+          fragColor = finalRadiance;
+        }
+      `;
+
+      // -------------------------------------------------------------------------
+      // FINAL PASS: COMPOSITING + 2.5D LIGHTING + ACES FILMIC TONE MAPPING
+      // Integrates the 4 rays from Cascade 0 (hemispherical/omnidirectional irradiance),
+      // applies directional shading using SDF normals, volumetric scattering,
+      // subtle chromatic aberration, and ACES Filmic.
+      // -------------------------------------------------------------------------
+      const compositeFS = `#version 300 es
+        precision highp float;
+
+        in vec2 vUv;
+        out vec4 fragColor;
+
+        uniform sampler2D uSceneTex;    // RGB = Emissive, A = SDF
+        uniform sampler2D uMaterialTex; // RGB = Albedo, A = 2.5D Height
+        uniform sampler2D uCascade0Tex; // Cascade 0 (2x2 directions per probe)
+        uniform vec2 uResolution;
+        uniform vec2 uCascade0Res;
+        uniform int uViewMode;          // 0=Final, 1=Radiance Cascades, 2=SDF & Normals, 3=Emissive
+        uniform float uTime;
+
+        // Integrates Cascade 0 irradiance (2x2 = 4 angular quadrants)
+        // with smooth spatial bilinear interpolation between probes
+        vec3 gatherCascade0Irradiance(vec2 uv, vec3 surfaceNormal, bool isSolid) {
+          // Cascade 0 has dirsPerSide = 2 (4 directions: 45°, 135°, 225°, 315°)
+          vec2 gridSize = floor(uCascade0Res / 2.0);
+          vec2 probeCoord = uv * gridSize - 0.5;
+          vec2 baseProbe = floor(probeCoord);
+          vec2 frac = clamp(probeCoord - baseProbe, 0.0, 1.0);
+
+          vec3 totalIrradiance = vec3(0.0);
+
+          for (int d = 0; d < 4; d++) {
+            int dx = d % 2;
+            int dy = d / 2;
+            vec2 dirOffset = vec2(float(dx), float(dy)) + 0.5;
+
+            float angle = (float(d) + 0.5) * (6.28318530718 / 4.0);
+            vec2 rayDir = vec2(cos(angle), sin(angle));
+
+            // 2.5D Lambertian weighting when over solid surface
+            float weight = 0.25;
+            if (isSolid) {
+              float ndotl = max(dot(normalize(surfaceNormal.xy + vec2(1e-5)), rayDir), 0.0);
+              weight = mix(0.20, 0.42, ndotl);
+            }
+
+            vec2 p00 = (clamp(baseProbe + vec2(0.0, 0.0), vec2(0.0), gridSize - 1.0) * 2.0 + dirOffset) / uCascade0Res;
+            vec2 p10 = (clamp(baseProbe + vec2(1.0, 0.0), vec2(0.0), gridSize - 1.0) * 2.0 + dirOffset) / uCascade0Res;
+            vec2 p01 = (clamp(baseProbe + vec2(0.0, 1.0), vec2(0.0), gridSize - 1.0) * 2.0 + dirOffset) / uCascade0Res;
+            vec2 p11 = (clamp(baseProbe + vec2(1.0, 1.0), vec2(0.0), gridSize - 1.0) * 2.0 + dirOffset) / uCascade0Res;
+
+            vec3 s00 = texture(uCascade0Tex, p00).rgb;
+            vec3 s10 = texture(uCascade0Tex, p10).rgb;
+            vec3 s01 = texture(uCascade0Tex, p01).rgb;
+            vec3 s11 = texture(uCascade0Tex, p11).rgb;
+
+            vec3 rad = mix(mix(s00, s10, frac.x), mix(s01, s11, frac.x), frac.y);
+            totalIrradiance += rad * weight;
+          }
+
+          return totalIrradiance;
+        }
+
+        // ACES Filmic Tone Mapping
+        vec3 acesFilmic(vec3 x) {
+          float a = 2.51;
+          float b = 0.03;
+          float c = 2.43;
+          float d = 0.59;
+          float e = 0.14;
+          return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+        }
+
+        // Fast hash for subtle film grain
+        float hash12(vec2 p) {
+          vec3 p3  = fract(vec3(p.xyx) * 0.1031);
+          p3 += dot(p3, p3.yzx + 33.33);
+          return fract((p3.x + p3.y) * p3.z);
+        }
+
+        void main() {
+          vec2 texel = 1.0 / uResolution;
+          vec2 centered = vUv - 0.5;
+          float distCenter = length(centered);
+
+          // Very subtle radial chromatic aberration at edges
+          vec2 caOffset = centered * distCenter * 0.0045;
+          vec4 sceneR = texture(uSceneTex, clamp(vUv + caOffset, 0.0, 1.0));
+          vec4 sceneG = texture(uSceneTex, vUv);
+          vec4 sceneB = texture(uSceneTex, clamp(vUv - caOffset, 0.0, 1.0));
+
+          vec3 emissive = vec3(sceneR.r, sceneG.g, sceneB.b);
+          float sdf = sceneG.a;
+
+          vec4 matData = texture(uMaterialTex, vUv);
+          vec3 albedo = matData.rgb;
+          float height = matData.a;
+
+          // 2.5D normal reconstruction from SDF gradient
+          float dL = texture(uSceneTex, vUv - vec2(texel.x, 0.0)).a;
+          float dR = texture(uSceneTex, vUv + vec2(texel.x, 0.0)).a;
+          float dD = texture(uSceneTex, vUv - vec2(0.0, texel.y)).a;
+          float dU = texture(uSceneTex, vUv + vec2(0.0, texel.y)).a;
+          vec3 normal = normalize(vec3((dR - dL) * 28.0, (dU - dD) * 28.0, 0.45));
+
+          bool isSolid = sdf <= 0.0;
+          vec3 giRadiance = gatherCascade0Irradiance(vUv, normal, isSolid);
+
+          vec3 color = vec3(0.0);
+
+          if (uViewMode == 0) {
+            // MODE 0: FINAL (GI + SDF + VOLUMETRIC SCATTERING)
+            float solidMask = smoothstep(0.004, -0.004, sdf);
+
+            // Diffuse and specular lighting on solid fractal geometry
+            float ao = clamp(0.35 + height * 0.70, 0.18, 1.05);
+            vec3 viewDir = vec3(0.0, 0.0, 1.0);
+            vec3 lightDir = normalize(vec3(giRadiance.r - giRadiance.b, giRadiance.g - 0.2, 0.85));
+            vec3 halfVec = normalize(lightDir + viewDir);
+            float spec = pow(max(dot(normal, halfVec), 0.0), 28.0) * 0.32;
+
+            vec3 solidLit = albedo * (giRadiance * 1.15 + vec3(0.015, 0.020, 0.030)) * ao
+                          + giRadiance * spec * 0.45;
+
+            // Atmospheric / volumetric scattering in empty space (preserves deep blacks)
+            float edgeGlow = exp(-max(sdf, 0.0) * 28.0);
+            vec3 voidFog = giRadiance * (0.34 + 0.24 * edgeGlow) + vec3(0.004, 0.006, 0.010);
+
+            color = mix(voidFog, solidLit, solidMask) + emissive * 0.78;
+
+          } else if (uViewMode == 1) {
+            // MODE 1: PURE RADIANCE CASCADES (GLOBAL ILLUMINATION FIELD)
+            color = giRadiance * 0.85;
+
+          } else if (uViewMode == 2) {
+            // MODE 2: SDF & NORMALS (HIGH-PRECISION VISUAL DEBUG)
+            vec3 normCol = normal * 0.5 + 0.5;
+            float isolines = smoothstep(0.85, 0.98, abs(sin(sdf * 140.0)));
+            float zeroContour = smoothstep(0.004, 0.0, abs(sdf));
+            vec3 sdfSignCol = sdf < 0.0 ? normCol : mix(vec3(0.04, 0.08, 0.14), vec3(0.15, 0.45, 0.65), exp(-sdf * 6.0));
+            color = mix(sdfSignCol, vec3(0.95), isolines * 0.35) + vec3(1.0, 0.85, 0.2) * zeroContour;
+            fragColor = vec4(color, 1.0);
+            return;
+
+          } else {
+            // MODE 3: EMISSIVE SEED (INPUT TO CASCADES)
+            color = emissive * 0.85;
+          }
+
+          // Smooth highlight compression preserving chromatic saturation (avoids white washout)
+          float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+          color = mix(color, color / (1.0 + luma * 0.45), 0.55);
+
+          // ACES Filmic Tone Mapping + Gamma Correction
+          color = acesFilmic(color);
+          color = pow(color, vec3(1.0 / 2.2));
+
+          // Smooth cinematic vignette
+          float vignette = 1.0 - smoothstep(0.45, 1.35, distCenter * 1.35);
+          color *= mix(0.68, 1.0, vignette);
+
+          // Imperceptible organic film grain to prevent banding
+          float grain = (hash12(vUv * uResolution + fract(uTime) * 100.0) - 0.5) * 0.016;
+          color = clamp(color + grain, 0.0, 1.0);
+
+          fragColor = vec4(color, 1.0);
+        }
+      `;
+
+      // =========================================================================
+      // WEBGL2 PROGRAM COMPILATION AND LINKING
+      // =========================================================================
+      function showShaderError(msg) {
+        const errorBox = document.getElementById('errorBox');
+        const card = errorBox.querySelector('.error-card');
+        card.innerHTML = `<h2 style="margin-bottom: 10px; color: #f87171;">GLSL Shader Error</h2>
+          <pre style="font-size: 11px; color: #cbd5e1; text-align: left; white-space: pre-wrap; max-height: 240px; overflow-y: auto;">${msg}</pre>`;
+        errorBox.classList.add('visible');
+      }
+
+      function compileShader(type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          const log = gl.getShaderInfoLog(shader);
+          console.error('GLSL compilation error:', log);
+          showShaderError(log);
+          gl.deleteShader(shader);
+          return null;
+        }
+        return shader;
+      }
+
+      function createProgram(vsSrc, fsSrc) {
+        const vs = compileShader(gl.VERTEX_SHADER, vsSrc);
+        const fs = compileShader(gl.FRAGMENT_SHADER, fsSrc);
+        if (!vs || !fs) return null;
+        const prog = gl.createProgram();
+        gl.attachShader(prog, vs);
+        gl.attachShader(prog, fs);
+        gl.linkProgram(prog);
+        if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+          const log = gl.getProgramInfoLog(prog);
+          console.error('WebGL2 linking error:', log);
+          showShaderError(log);
+          return null;
+        }
+        return prog;
+      }
+
+      const sceneProgram = createProgram(quadVS, sceneSDF_FS);
+      const rcProgram = createProgram(quadVS, radianceCascadeFS);
+      const compositeProgram = createProgram(quadVS, compositeFS);
+
+      if (!sceneProgram || !rcProgram || !compositeProgram) return;
+
+      const emptyVAO = gl.createVertexArray();
+
+      // =========================================================================
+      // FRAMEBUFFER MANAGEMENT (SCENE MRT + CASCADE HIERARCHY)
+      // =========================================================================
+      const NUM_CASCADES = 4; // Cascades 0, 1, 2, 3 (4, 16, 64, 256 directions)
+      let sceneFBO = null;
+      let sceneTex0 = null; // Emissive + SDF
+      let sceneTex1 = null; // Albedo + Height
+      let sceneWidth = 0;
+      let sceneHeight = 0;
+
+      const cascades = [];
+
+      function createTexture(w, h) {
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, gl.RGBA, texType, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filterMode);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filterMode);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        return tex;
+      }
+
+      function rebuildBuffers() {
+        // Adaptive DPR scaling to maintain smooth 60fps on Retina/4K displays
+        const rawDpr = window.devicePixelRatio || 1;
+        const dpr = Math.min(rawDpr, 1.5) * state.qualityScale;
+
+        const w = Math.max(320, Math.floor(window.innerWidth * dpr));
+        const h = Math.max(240, Math.floor(window.innerHeight * dpr));
+
+        if (w === sceneWidth && h === sceneHeight && sceneFBO) return;
+        sceneWidth = w;
+        sceneHeight = h;
+
+        canvas.width = w;
+        canvas.height = h;
+
+        // Clean up previous buffers
+        if (sceneFBO) gl.deleteFramebuffer(sceneFBO);
+        if (sceneTex0) gl.deleteTexture(sceneTex0);
+        if (sceneTex1) gl.deleteTexture(sceneTex1);
+        cascades.forEach(c => {
+          gl.deleteFramebuffer(c.fbo);
+          gl.deleteTexture(c.tex);
+        });
+        cascades.length = 0;
+
+        // Create Scene FBO with Multiple Render Targets (MRT)
+        sceneFBO = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFBO);
+
+        sceneTex0 = createTexture(w, h);
+        sceneTex1 = createTexture(w, h);
+
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, sceneTex0, 0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, sceneTex1, 0);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+
+        // Create Radiance Cascades FBOs
+        // In Cascade 0, each probe occupies 2x2 pixels (4 directions), with a 2px base screen spacing
+        // In subsequent cascades: probes halve along each axis, directions double along each axis,
+        // keeping the total atlas size constant or slightly smaller for ultra-high performance!
+        const baseScale = 0.75; // High probe density in Cascade 0
+        const c0W = Math.max(64, Math.floor((w * baseScale) / 16) * 16);
+        const c0H = Math.max(64, Math.floor((h * baseScale) / 16) * 16);
+
+        for (let i = 0; i < NUM_CASCADES; i++) {
+          // Keep dimensions aligned to multiples of dirsPerSide = 2^(i+1)
+          const dirsPerSide = 1 << (i + 1);
+          const cw = Math.max(dirsPerSide * 4, Math.floor(c0W / dirsPerSide) * dirsPerSide);
+          const ch = Math.max(dirsPerSide * 4, Math.floor(c0H / dirsPerSide) * dirsPerSide);
+
+          const tex = createTexture(cw, ch);
+          const fbo = gl.createFramebuffer();
+          gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+
+          cascades.push({ fbo, tex, width: cw, height: ch });
+        }
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        updateStatsUI();
+      }
+
+      // =========================================================================
+      // APPLICATION STATE & INTERACTIVE CONTROLS
+      // =========================================================================
+      const state = {
+        viewMode: 0,
+        archetype: 5,
+        palette: 4,
+        warpType: 0,
+        warpAmt: 1.0,
+        noiseType: 0,
+        noiseScale: 2.5,
+        noiseAmt: 0.6,
+        zoomSpeed: 0.45,
+        morph: 2.10,
+        iterations: 8,
+        rcRange: 1.15,
+        giGain: 0.95,
+        manualZoom: 1.0,
+        panX: 0.0,
+        panY: 0.0,
+        mouseX: 0.5,
+        mouseY: 0.5,
+        targetMouseX: 0.5,
+        targetMouseY: 0.5,
+        mouseActive: 0.0,
+        animating: true,
+        cursorLight: true,
+        time: 0.0,
+        zoomTime: 0.0,
+        qualityScale: 1.0
+      };
+
+      // Cache Uniform Locations
+      const uScene = {
+        uResolution: gl.getUniformLocation(sceneProgram, 'uResolution'),
+        uTime: gl.getUniformLocation(sceneProgram, 'uTime'),
+        uZoomTime: gl.getUniformLocation(sceneProgram, 'uZoomTime'),
+        uMorph: gl.getUniformLocation(sceneProgram, 'uMorph'),
+        uIterations: gl.getUniformLocation(sceneProgram, 'uIterations'),
+        uArchetype: gl.getUniformLocation(sceneProgram, 'uArchetype'),
+        uPalette: gl.getUniformLocation(sceneProgram, 'uPalette'),
+        uManualZoom: gl.getUniformLocation(sceneProgram, 'uManualZoom'),
+        uPan: gl.getUniformLocation(sceneProgram, 'uPan'),
+        uMouse: gl.getUniformLocation(sceneProgram, 'uMouse'),
+        uMouseActive: gl.getUniformLocation(sceneProgram, 'uMouseActive'),
+        uCursorLightOn: gl.getUniformLocation(sceneProgram, 'uCursorLightOn'),
+        uWarpType: gl.getUniformLocation(sceneProgram, 'uWarpType'),
+        uWarpAmt: gl.getUniformLocation(sceneProgram, 'uWarpAmt'),
+        uNoiseType: gl.getUniformLocation(sceneProgram, 'uNoiseType'),
+        uNoiseScale: gl.getUniformLocation(sceneProgram, 'uNoiseScale'),
+        uNoiseAmt: gl.getUniformLocation(sceneProgram, 'uNoiseAmt')
+      };
+
+      const uRC = {
+        uSceneTex: gl.getUniformLocation(rcProgram, 'uSceneTex'),
+        uUpperCascade: gl.getUniformLocation(rcProgram, 'uUpperCascade'),
+        uCascadeRes: gl.getUniformLocation(rcProgram, 'uCascadeRes'),
+        uUpperRes: gl.getUniformLocation(rcProgram, 'uUpperRes'),
+        uSceneRes: gl.getUniformLocation(rcProgram, 'uSceneRes'),
+        uCascadeIndex: gl.getUniformLocation(rcProgram, 'uCascadeIndex'),
+        uTotalCascades: gl.getUniformLocation(rcProgram, 'uTotalCascades'),
+        uMaxRange: gl.getUniformLocation(rcProgram, 'uMaxRange'),
+        uBounceGain: gl.getUniformLocation(rcProgram, 'uBounceGain')
+      };
+
+      const uComp = {
+        uSceneTex: gl.getUniformLocation(compositeProgram, 'uSceneTex'),
+        uMaterialTex: gl.getUniformLocation(compositeProgram, 'uMaterialTex'),
+        uCascade0Tex: gl.getUniformLocation(compositeProgram, 'uCascade0Tex'),
+        uResolution: gl.getUniformLocation(compositeProgram, 'uResolution'),
+        uCascade0Res: gl.getUniformLocation(compositeProgram, 'uCascade0Res'),
+        uViewMode: gl.getUniformLocation(compositeProgram, 'uViewMode'),
+        uTime: gl.getUniformLocation(compositeProgram, 'uTime')
+      };
+
+      // =========================================================================
+      // UI (HUD) BINDINGS AND MOUSE/TOUCH/KEYBOARD EVENTS
+      // =========================================================================
+      const hudPanel = document.getElementById('hudPanel');
+      const toggleHudBtn = document.getElementById('toggleHudBtn');
+      const statsBadge = document.getElementById('statsBadge');
+
+      toggleHudBtn.addEventListener('click', () => {
+        hudPanel.classList.toggle('hidden');
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'h' || e.key === 'H') {
+          hudPanel.classList.toggle('hidden');
+        }
+      });
+
+      // View Mode Buttons
+      document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          state.viewMode = parseInt(btn.dataset.mode, 10);
+        });
+      });
+
+      // Archetype and Palette
+      document.getElementById('archetypeSelect').addEventListener('change', (e) => {
+        state.archetype = parseInt(e.target.value, 10);
+      });
+
+      document.getElementById('paletteSelect').addEventListener('change', (e) => {
+        state.palette = parseInt(e.target.value, 10);
+      });
+
+      // Sliders
+      const bindSlider = (id, valId, prop, fmt) => {
+        const el = document.getElementById(id);
+        const valEl = document.getElementById(valId);
+        el.addEventListener('input', () => {
+          state[prop] = parseFloat(el.value);
+          valEl.textContent = fmt(state[prop]);
+        });
+      };
+
+      bindSlider('zoomSpeedSlider', 'zoomSpeedVal', 'zoomSpeed', v => v.toFixed(2));
+      bindSlider('morphSlider', 'morphVal', 'morph', v => v.toFixed(2));
+      bindSlider('iterSlider', 'iterVal', 'iterations', v => Math.round(v));
+      bindSlider('rcRangeSlider', 'rcRangeVal', 'rcRange', v => v.toFixed(2));
+      bindSlider('giGainSlider', 'giGainVal', 'giGain', v => v.toFixed(2));
+      bindSlider('warpAmtSlider', 'warpAmtVal', 'warpAmt', v => v.toFixed(2));
+      bindSlider('noiseScaleSlider', 'noiseScaleVal', 'noiseScale', v => v.toFixed(1));
+      bindSlider('noiseAmtSlider', 'noiseAmtVal', 'noiseAmt', v => v.toFixed(2));
+
+      document.getElementById('warpSelect').addEventListener('change', (e) => {
+        state.warpType = parseInt(e.target.value, 10);
+      });
+      document.getElementById('noiseSelect').addEventListener('change', (e) => {
+        state.noiseType = parseInt(e.target.value, 10);
+      });
+
+      // Randomize archetype / palette / distortion / noise combination
+      document.getElementById('randomBtn').addEventListener('click', () => {
+        const rnd = (a, b) => a + Math.random() * (b - a);
+        const set = (id, v, ev) => {
+          const el = document.getElementById(id);
+          el.value = v;
+          el.dispatchEvent(new Event(ev));
+        };
+        set('archetypeSelect', Math.floor(rnd(0, 11)), 'change');
+        set('paletteSelect', Math.floor(rnd(0, 5)), 'change');
+        set('warpSelect', Math.floor(rnd(0, 10)), 'change');
+        set('noiseSelect', Math.floor(rnd(0, 7)), 'change');
+        set('morphSlider', rnd(0, 6.283).toFixed(3), 'input');
+        set('warpAmtSlider', rnd(0.4, 1.6).toFixed(2), 'input');
+        set('noiseAmtSlider', rnd(0.2, 1.2).toFixed(2), 'input');
+        set('noiseScaleSlider', rnd(1, 5).toFixed(1), 'input');
+      });
+
+      // Toggles
+      const animToggle = document.getElementById('animToggle');
+      animToggle.addEventListener('click', () => {
+        state.animating = !state.animating;
+        animToggle.classList.toggle('active', state.animating);
+        animToggle.textContent = `Continuous Flow: ${state.animating ? 'ON' : 'OFF'}`;
+      });
+
+      const cursorLightToggle = document.getElementById('cursorLightToggle');
+      cursorLightToggle.addEventListener('click', () => {
+        state.cursorLight = !state.cursorLight;
+        cursorLightToggle.classList.toggle('active', state.cursorLight);
+        cursorLightToggle.textContent = `Cursor Warp & Light: ${state.cursorLight ? 'ON' : 'OFF'}`;
+      });
+
+      // Canvas Mouse & Touch Interaction
+      let isDragging = false;
+      let lastDragX = 0;
+      let lastDragY = 0;
+
+      function updatePointer(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        state.targetMouseX = (clientX - rect.left) / rect.width;
+        state.targetMouseY = 1.0 - (clientY - rect.top) / rect.height;
+        state.mouseActive = 1.0;
+      }
+
+      canvas.addEventListener('pointerdown', (e) => {
+        isDragging = true;
+        lastDragX = e.clientX;
+        lastDragY = e.clientY;
+        updatePointer(e.clientX, e.clientY);
+      });
+
+      window.addEventListener('pointermove', (e) => {
+        updatePointer(e.clientX, e.clientY);
+        if (isDragging) {
+          const dx = (e.clientX - lastDragX) / window.innerHeight;
+          const dy = (e.clientY - lastDragY) / window.innerHeight;
+          state.panX -= (dx * 2.0) / state.manualZoom;
+          state.panY += (dy * 2.0) / state.manualZoom;
+          state.panX = Math.max(-1.2, Math.min(1.2, state.panX));
+          state.panY = Math.max(-1.2, Math.min(1.2, state.panY));
+          lastDragX = e.clientX;
+          lastDragY = e.clientY;
+        }
+      });
+
+      window.addEventListener('pointerup', () => {
+        isDragging = false;
+      });
+
+      canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        // Scroll directly drives the infinite zoom dive
+        state.zoomTime += (e.deltaY < 0 ? 0.18 : -0.18);
+      }, { passive: false });
+
+      // =========================================================================
+      // GPU RENDER LOOP + ADAPTIVE PERFORMANCE MONITOR
+      // =========================================================================
+      let lastTime = performance.now();
+      let frameCount = 0;
+      let fpsAccumTime = 0;
+      let currentFps = 60;
+
+      function updateStatsUI() {
+        statsBadge.innerHTML = `${currentFps} FPS<br />${sceneWidth}×${sceneHeight}`;
+      }
+
+      function render(now) {
+        const dt = Math.min((now - lastTime) * 0.001, 0.1);
+        lastTime = now;
+
+        if (state.animating) {
+          state.time += dt;
+          state.zoomTime += dt * state.zoomSpeed;
+        }
+
+        // Smooth cursor movement
+        state.mouseX += (state.targetMouseX - state.mouseX) * 0.14;
+        state.mouseY += (state.targetMouseY - state.mouseY) * 0.14;
+
+        gl.bindVertexArray(emptyVAO);
+
+        // -----------------------------------------------------------------------
+        // 1. SCENE PASS: INFINITE ZOOM FRACTAL SDF & ABSTRACT PAREIDOLIA
+        // -----------------------------------------------------------------------
+        gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFBO);
+        gl.viewport(0, 0, sceneWidth, sceneHeight);
+        gl.useProgram(sceneProgram);
+
+        gl.uniform2f(uScene.uResolution, sceneWidth, sceneHeight);
+        gl.uniform1f(uScene.uTime, state.time);
+        gl.uniform1f(uScene.uZoomTime, state.zoomTime);
+        gl.uniform1f(uScene.uMorph, state.morph);
+        gl.uniform1i(uScene.uIterations, state.iterations);
+        gl.uniform1i(uScene.uArchetype, state.archetype);
+        gl.uniform1i(uScene.uPalette, state.palette);
+        gl.uniform1f(uScene.uManualZoom, state.manualZoom);
+        gl.uniform2f(uScene.uPan, state.panX, state.panY);
+        gl.uniform2f(uScene.uMouse, state.mouseX, state.mouseY);
+        gl.uniform1f(uScene.uMouseActive, state.mouseActive);
+        gl.uniform1f(uScene.uCursorLightOn, state.cursorLight ? 1.0 : 0.0);
+        gl.uniform1i(uScene.uWarpType, state.warpType);
+        gl.uniform1f(uScene.uWarpAmt, state.warpAmt);
+        gl.uniform1i(uScene.uNoiseType, state.noiseType);
+        gl.uniform1f(uScene.uNoiseScale, state.noiseScale);
+        gl.uniform1f(uScene.uNoiseAmt, state.noiseAmt);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+        // -----------------------------------------------------------------------
+        // 2. RADIANCE CASCADES PASSES (FROM C = N-1 DOWN TO C = 0)
+        // -----------------------------------------------------------------------
+        gl.useProgram(rcProgram);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, sceneTex0);
+        gl.uniform1i(uRC.uSceneTex, 0);
+        gl.uniform2f(uRC.uSceneRes, sceneWidth, sceneHeight);
+        gl.uniform1i(uRC.uTotalCascades, NUM_CASCADES);
+        gl.uniform1f(uRC.uMaxRange, state.rcRange);
+        gl.uniform1f(uRC.uBounceGain, state.giGain);
+
+        for (let c = NUM_CASCADES - 1; c >= 0; c--) {
+          const curr = cascades[c];
+          gl.bindFramebuffer(gl.FRAMEBUFFER, curr.fbo);
+          gl.viewport(0, 0, curr.width, curr.height);
+
+          gl.uniform2f(uRC.uCascadeRes, curr.width, curr.height);
+          gl.uniform1i(uRC.uCascadeIndex, c);
+
+          if (c < NUM_CASCADES - 1) {
+            const upper = cascades[c + 1];
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, upper.tex);
+            gl.uniform1i(uRC.uUpperCascade, 1);
+            gl.uniform2f(uRC.uUpperRes, upper.width, upper.height);
+          } else {
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, curr.tex);
+            gl.uniform1i(uRC.uUpperCascade, 1);
+            gl.uniform2f(uRC.uUpperRes, curr.width, curr.height);
+          }
+
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+
+        // -----------------------------------------------------------------------
+        // 3. FINAL PASS: COMPOSITING + ACES FILMIC TONE MAPPING
+        // -----------------------------------------------------------------------
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, sceneWidth, sceneHeight);
+        gl.useProgram(compositeProgram);
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, sceneTex0);
+        gl.uniform1i(uComp.uSceneTex, 0);
+
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, sceneTex1);
+        gl.uniform1i(uComp.uMaterialTex, 1);
+
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, cascades[0].tex);
+        gl.uniform1i(uComp.uCascade0Tex, 2);
+
+        gl.uniform2f(uComp.uResolution, sceneWidth, sceneHeight);
+        gl.uniform2f(uComp.uCascade0Res, cascades[0].width, cascades[0].height);
+        gl.uniform1i(uComp.uViewMode, state.viewMode);
+        gl.uniform1f(uComp.uTime, state.time);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+        // FPS calculation and dynamic resolution adjustment if needed
+        frameCount++;
+        fpsAccumTime += dt;
+        if (fpsAccumTime >= 0.5) {
+          currentFps = Math.round(frameCount / fpsAccumTime);
+          updateStatsUI();
+
+          // Smooth auto-scaling if GPU is overloaded (< 35 FPS)
+          if (currentFps < 35 && state.qualityScale > 0.65) {
+            state.qualityScale = Math.max(0.65, state.qualityScale - 0.15);
+            rebuildBuffers();
+          }
+
+          frameCount = 0;
+          fpsAccumTime = 0;
+        }
+
+        requestAnimationFrame(render);
+      }
+
+      window.addEventListener('resize', rebuildBuffers);
+      window.onload = () => {
+        rebuildBuffers();
+        requestAnimationFrame(render);
+      };
+    })();
+  </script>
+</body>
+</html>
